@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 60" width="240" height="60">
+  <!-- Clock Icon -->
+  <g transform="translate(4, 4)">
+    <!-- Outer clock ring -->
+    <circle cx="26" cy="26" r="24" fill="#0f172a" stroke="#1a56db" stroke-width="2.5"/>
+    <!-- Inner clock face -->
+    <circle cx="26" cy="26" r="20" fill="#0f172a"/>
+    <!-- Clock tick marks -->
+    <line x1="26" y1="8" x2="26" y2="11" stroke="#334155" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="26" y1="41" x2="26" y2="44" stroke="#334155" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="8" y1="26" x2="11" y2="26" stroke="#334155" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="41" y1="26" x2="44" y2="26" stroke="#334155" stroke-width="1.5" stroke-linecap="round"/>
+    <!-- Hour hand pointing to 12 (straight up) -->
+    <line x1="26" y1="26" x2="26" y2="12" stroke="#f59e0b" stroke-width="2.5" stroke-linecap="round"/>
+    <!-- Minute hand pointing to 12 (perfectly aligned - "no limit / full potential") -->
+    <line x1="26" y1="26" x2="26" y2="9" stroke="#1a56db" stroke-width="1.8" stroke-linecap="round"/>
+    <!-- Arrow tip on minute hand -->
+    <polygon points="26,7 23.5,12 28.5,12" fill="#1a56db"/>
+    <!-- Center dot -->
+    <circle cx="26" cy="26" r="2.5" fill="#f59e0b"/>
+    <!-- Gold accent ring -->
+    <circle cx="26" cy="26" r="24" fill="none" stroke="#f59e0b" stroke-width="0.6" stroke-dasharray="3,4" stroke-dashoffset="1"/>
+  </g>
+
+  <!-- Company Name Text -->
+  <text x="66" y="24" font-family="'DM Serif Display', Georgia, serif" font-size="19" font-weight="400" fill="#1e293b">No Limit Capital</text>
+  <text x="66" y="44" font-family="'Sora', sans-serif" font-size="10.5" font-weight="300" fill="#64748b" letter-spacing="2.5">SOLUTIONS</text>
+</svg>

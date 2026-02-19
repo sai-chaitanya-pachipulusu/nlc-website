@@ -1,0 +1,10 @@
+server/example-pdfs/APP-NLC.pdf
+server/uploads/
+server/generated-pdfs/
+server/test*
+node_modules/
+server/node_modules/
+.env
+.DS_Store
+dist/
+build/
