@@ -16,7 +16,7 @@
 
 const fs   = require('fs');
 const path = require('path');
-const { PDFDocument: PdfLib, StandardFonts, PDFName, PDFArray } = require('pdf-lib');
+const { PDFDocument: PdfLib, StandardFonts, PDFName, PDFNumber } = require('pdf-lib');
 
 const OUTPUT_PATH = path.join(__dirname, 'pdf-templates', 'nolimitcap-empty-application.pdf');
 
@@ -65,12 +65,13 @@ async function overlayAcroFormFields(pdfBuffer, coords, pageHeight) {
 
   form.updateFieldAppearances(helvetica);
 
-  // MK/BG = [] (empty array) = transparent background per PDF spec
+  // MK/BG = [1] (DeviceGray white) — overrides PDF viewer blue highlight
+  const white = pdfDoc.context.obj([PDFNumber.of(1)]);
   form.getFields().forEach((f) => {
     f.acroField.getWidgets().forEach((w) => {
       try {
         const mk = w.getOrCreateMK();
-        mk.set(PDFName.of('BG'), PDFArray.withContext(pdfDoc.context));
+        mk.set(PDFName.of('BG'), white);
         mk.delete(PDFName.of('BC'));
       } catch (_) {}
     });

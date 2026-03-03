@@ -2,8 +2,25 @@
 
 const fs   = require('fs/promises');
 const path = require('path');
-const { PDFDocument, StandardFonts, PDFName, PDFArray } = require('pdf-lib');
+const { PDFDocument, StandardFonts, PDFName, PDFNumber } = require('pdf-lib');
 const { computeFieldCoords } = require('./pdf-field-coords');
+
+// ---------------------------------------------------------------------------
+// Shared helper: white background on all AcroForm field widgets
+// ---------------------------------------------------------------------------
+function clearFieldHighlights(pdfDoc, form) {
+  // MK/BG = [1] = DeviceGray white — overrides the blue viewer highlight.
+  const white = pdfDoc.context.obj([PDFNumber.of(1)]);
+  form.getFields().forEach((f) => {
+    f.acroField.getWidgets().forEach((w) => {
+      try {
+        const mk = w.getOrCreateMK();
+        mk.set(PDFName.of('BG'), white);
+        mk.delete(PDFName.of('BC'));
+      } catch (_) {}
+    });
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -196,6 +213,8 @@ async function generateApplicationPdfFromTemplate(record, options = {}) {
   const fieldMap = buildFieldMappings(record);
   Object.entries(fieldMap).forEach(([name, value]) => setTextField(form, name, value));
 
+  // Set white background before generating appearances so it's baked into AP streams
+  clearFieldHighlights(pdfDoc, form);
   form.updateFieldAppearances(helvetica);
 
   // 2. Handle signature fields — image OR typed text, never the raw data URI
@@ -269,17 +288,7 @@ async function generateFillablePdfFromLayout(record, options = {}) {
     } catch (_) {}
   }
 
-  // Make all fields transparent (no background / border colour)
-  form.getFields().forEach((f) => {
-    f.acroField.getWidgets().forEach((w) => {
-      try {
-        const mk = w.getOrCreateMK();
-        mk.set(PDFName.of('BG'), PDFArray.withContext(pdfDoc.context));
-        mk.delete(PDFName.of('BC'));
-      } catch (_) {}
-    });
-  });
-
+  clearFieldHighlights(pdfDoc, form);
   form.updateFieldAppearances(helvetica);
 
   // Step 3: Fill all text fields with record values
