@@ -541,11 +541,20 @@ async function generateApplicationPdf(record) {
   try {
     buffer = await generateApplicationPdfFromTemplate(record, {
       templatePath: PDF_FORM_TEMPLATE_PATH,
-      flatten: true,
+      flatten: false,  // keep fields editable so recipient can review/edit
     });
   } catch (error) {
+    // Sanitize base64 signature images before the pdfkit fallback (pdfkit renders plain text)
+    const sanitized = { ...record };
+    const isImg = v => typeof v === 'string' && v.startsWith('data:image/');
+    if (isImg(sanitized.signature)) {
+      sanitized.signature = `${record.owner_first_name || ''} ${record.owner_last_name || ''}`.trim();
+    }
+    if (isImg(sanitized.signature_additional)) {
+      sanitized.signature_additional = `${record.additional_owner_first_name || ''} ${record.additional_owner_last_name || ''}`.trim();
+    }
     // Fall back to programmatic layout when template is unavailable or invalid.
-    buffer = await generateApplicationPdfBuffer(record, {
+    buffer = await generateApplicationPdfBuffer(sanitized, {
       companyName: 'No Limit Capital',
       margin: 24,
       logoPath: LOGO_PATH,

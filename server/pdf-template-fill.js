@@ -1,58 +1,58 @@
-const fs = require('fs/promises');
+'use strict';
+
+const fs   = require('fs/promises');
 const path = require('path');
 const { PDFDocument, StandardFonts } = require('pdf-lib');
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 function normalizeValue(value) {
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item).trim()).filter(Boolean).join(', ');
-  }
-  if (value === undefined || value === null) {
-    return '';
-  }
+  if (Array.isArray(value)) return value.map(i => String(i).trim()).filter(Boolean).join(', ');
+  if (value === undefined || value === null) return '';
   return String(value).trim();
 }
 
 function toYesNo(value) {
-  const normalized = normalizeValue(value).toLowerCase();
-  if (!normalized) return '';
-  if (['yes', 'true', '1', 'on', 'checked'].includes(normalized)) return 'YES';
-  if (['no', 'false', '0', 'off'].includes(normalized)) return 'NO';
+  const n = normalizeValue(value).toLowerCase();
+  if (!n) return '';
+  if (['yes', 'true', '1', 'on', 'checked'].includes(n)) return 'YES';
+  if (['no', 'false', '0', 'off'].includes(n)) return 'NO';
   return normalizeValue(value);
 }
 
 function formatDate(value) {
-  const normalized = normalizeValue(value);
-  if (!normalized) return '';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-    const [year, month, day] = normalized.split('-');
-    return `${month}/${day}/${year}`;
+  const n = normalizeValue(value);
+  if (!n) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(n)) {
+    const [y, m, d] = n.split('-');
+    return `${m}/${d}/${y}`;
   }
-  return normalized;
+  return n;
 }
 
-async function fileExists(filePath) {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch (error) {
-    return false;
-  }
+function isBase64Image(value) {
+  return typeof value === 'string' && value.startsWith('data:image/');
 }
 
-function setTextFieldIfPresent(form, fieldName, value) {
-  try {
-    const field = form.getTextField(fieldName);
-    field.setText(normalizeValue(value));
-    return true;
-  } catch (error) {
-    return false;
-  }
+async function fileExists(p) {
+  try { await fs.access(p); return true; } catch { return false; }
 }
+
+function setTextField(form, name, value) {
+  try { form.getTextField(name).setText(normalizeValue(value)); return true; }
+  catch { return false; }
+}
+
+// ---------------------------------------------------------------------------
+// Field map — does NOT include signature fields (handled separately below)
+// ---------------------------------------------------------------------------
 
 function buildFieldMappings(record) {
-  const owner1Name = `${normalizeValue(record.owner_first_name)} ${normalizeValue(record.owner_last_name)}`.trim();
-  const owner2Name = `${normalizeValue(record.additional_owner_first_name)} ${normalizeValue(record.additional_owner_last_name)}`.trim();
-  const preferredContact = `${normalizeValue(record.first_name)} ${normalizeValue(record.last_name)}`.trim();
+  const preferred = `${normalizeValue(record.first_name)} ${normalizeValue(record.last_name)}`.trim();
+  const owner1    = `${normalizeValue(record.owner_first_name)} ${normalizeValue(record.owner_last_name)}`.trim();
+  const owner2    = `${normalizeValue(record.additional_owner_first_name)} ${normalizeValue(record.additional_owner_last_name)}`.trim();
 
   return {
     legal_business_name: record.legal_business_name,
@@ -64,7 +64,7 @@ function buildFieldMappings(record) {
     business_phone: record.business_phone,
     business_website: record.business_website,
     industry: record.industry,
-    preferred_contact_name: preferredContact,
+    preferred_contact_name: preferred,
     contact_number: record.contact_number,
     email: record.email,
     legal_entity: record.legal_entity,
@@ -123,53 +123,105 @@ function buildFieldMappings(record) {
     business_trade_reference_3_contact_person: record.business_trade_reference_3_contact_person,
     business_trade_reference_3_phone: record.business_trade_reference_3_phone,
 
-    signature: record.signature,
+    // Auth print-name rows (always text)
+    sig_owner1_name: owner1,
+    sig_owner2_name: owner2,
+
     application_date: formatDate(record.application_date),
-    signature_additional: record.signature_additional,
     application_date_additional: formatDate(record.application_date_additional),
   };
 }
 
-async function generateApplicationPdfFromTemplate(record, options = {}) {
-  const templatePath = options.templatePath
-    ? path.resolve(options.templatePath)
-    : '';
+// ---------------------------------------------------------------------------
+// Signature image embedding
+// ---------------------------------------------------------------------------
 
-  if (!templatePath) {
-    throw new Error('No fillable PDF template path configured');
+/**
+ * Draw a base64 PNG/JPG image onto the page at the position of the named
+ * text field widget. Returns true on success, false on any failure.
+ */
+async function embedSignatureImage(pdfDoc, page, form, fieldName, dataUri) {
+  try {
+    const [header, b64] = dataUri.split(',');
+    if (!b64) return false;
+    const bytes = Buffer.from(b64, 'base64');
+
+    // Get widget rectangle via the text field API (reliable)
+    const tf      = form.getTextField(fieldName);
+    const widgets = tf.acroField.getWidgets();
+    if (!widgets.length) return false;
+    const { x, y, width, height } = widgets[0].getRectangle();
+
+    const image = header.includes('png')
+      ? await pdfDoc.embedPng(bytes)
+      : await pdfDoc.embedJpg(bytes);
+
+    const pad  = 2;
+    const dims = image.scaleToFit(width - pad * 2, height - pad * 2);
+    page.drawImage(image, {
+      x:      x + pad + (width  - pad * 2 - dims.width)  / 2,
+      y:      y + pad + (height - pad * 2 - dims.height) / 2,
+      width:  dims.width,
+      height: dims.height,
+    });
+    return true;
+  } catch (err) {
+    console.warn(`[pdf-fill] Could not embed signature for "${fieldName}":`, err.message);
+    return false;
   }
-
-  if (!await fileExists(templatePath)) {
-    throw new Error(`Fillable PDF template not found at ${templatePath}`);
-  }
-
-  const normalizedPath = templatePath.toLowerCase();
-  if (normalizedPath.includes('creative') || normalizedPath.includes('golden-age-assisted-living')) {
-    throw new Error(`Rejected non-NoLimitCap template path: ${templatePath}`);
-  }
-
-  const pdfBytes = await fs.readFile(templatePath);
-  const pdfDoc = await PDFDocument.load(pdfBytes);
-  const form = pdfDoc.getForm();
-  const existingFields = form.getFields();
-  if (!existingFields.length) {
-    throw new Error(`Template has no fillable fields: ${templatePath}`);
-  }
-  const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
-
-  const fields = buildFieldMappings(record);
-  Object.entries(fields).forEach(([name, value]) => {
-    setTextFieldIfPresent(form, name, value);
-  });
-
-  form.updateFieldAppearances(helvetica);
-  // Don't flatten - keep form fields editable
-  // To flatten (make non-editable), pass options.flatten = true
-
-  const output = await pdfDoc.save();
-  return Buffer.from(output);
 }
 
-module.exports = {
-  generateApplicationPdfFromTemplate,
-};
+// ---------------------------------------------------------------------------
+// Main export
+// ---------------------------------------------------------------------------
+
+async function generateApplicationPdfFromTemplate(record, options = {}) {
+  const templatePath = options.templatePath ? path.resolve(options.templatePath) : '';
+  if (!templatePath)             throw new Error('No fillable PDF template path configured');
+  if (!await fileExists(templatePath)) throw new Error(`Template not found: ${templatePath}`);
+
+  const lc = templatePath.toLowerCase();
+  if (lc.includes('creative') || lc.includes('golden-age-assisted-living'))
+    throw new Error(`Rejected non-NoLimitCap template: ${templatePath}`);
+
+  const pdfDoc = await PDFDocument.load(await fs.readFile(templatePath));
+  const form   = pdfDoc.getForm();
+  if (!form.getFields().length) throw new Error(`Template has no fillable fields: ${templatePath}`);
+
+  const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const page      = pdfDoc.getPages()[0];
+
+  // 1. Fill all regular text fields
+  const fieldMap = buildFieldMappings(record);
+  Object.entries(fieldMap).forEach(([name, value]) => setTextField(form, name, value));
+
+  form.updateFieldAppearances(helvetica);
+
+  // 2. Handle signature fields — image OR typed text, never the raw data URI
+  const owner1Name = `${normalizeValue(record.owner_first_name)} ${normalizeValue(record.owner_last_name)}`.trim();
+  const owner2Name = `${normalizeValue(record.additional_owner_first_name)} ${normalizeValue(record.additional_owner_last_name)}`.trim();
+
+  const sigPairs = [
+    { field: 'signature',            raw: record.signature,            fallback: owner1Name },
+    { field: 'signature_additional', raw: record.signature_additional, fallback: owner2Name },
+  ];
+
+  for (const { field, raw, fallback } of sigPairs) {
+    if (isBase64Image(raw)) {
+      // Try to embed the drawn/uploaded image; use owner name on failure
+      const ok = await embedSignatureImage(pdfDoc, page, form, field, raw);
+      if (!ok) setTextField(form, field, fallback);
+      // On success: image is drawn on page, text field stays blank (transparent overlay)
+    } else if (raw && raw.trim()) {
+      // Plain typed text signature
+      setTextField(form, field, raw.trim());
+    } else {
+      // Nothing provided — prefill with owner name
+      setTextField(form, field, fallback);
+    }
+  }
+
+  return Buffer.from(await pdfDoc.save());
+}
+
+module.exports = { generateApplicationPdfFromTemplate };
