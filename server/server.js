@@ -21,7 +21,7 @@ const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/clien
 const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
 const sgMail = require('@sendgrid/mail');
 const { generateApplicationPdfBuffer } = require('./pdf-layout');
-const { generateApplicationPdfFromTemplate } = require('./pdf-template-fill');
+const { generateApplicationPdfFromTemplate, generateFillablePdfFromLayout } = require('./pdf-template-fill');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const app = express();
@@ -553,8 +553,8 @@ async function generateApplicationPdf(record) {
     if (isImg(sanitized.signature_additional)) {
       sanitized.signature_additional = `${record.additional_owner_first_name || ''} ${record.additional_owner_last_name || ''}`.trim();
     }
-    // Fall back to programmatic layout when template is unavailable or invalid.
-    buffer = await generateApplicationPdfBuffer(sanitized, {
+    // Fall back to fillable pdfkit layout (also produces a fillable PDF)
+    buffer = await generateFillablePdfFromLayout(sanitized, {
       companyName: 'No Limit Capital',
       margin: 24,
       logoPath: LOGO_PATH,

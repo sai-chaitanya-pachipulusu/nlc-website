@@ -2,7 +2,8 @@
 
 const fs   = require('fs/promises');
 const path = require('path');
-const { PDFDocument, StandardFonts } = require('pdf-lib');
+const { PDFDocument, StandardFonts, PDFName, PDFArray } = require('pdf-lib');
+const { computeFieldCoords } = require('./pdf-field-coords');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -224,4 +225,86 @@ async function generateApplicationPdfFromTemplate(record, options = {}) {
   return Buffer.from(await pdfDoc.save());
 }
 
-module.exports = { generateApplicationPdfFromTemplate };
+// ---------------------------------------------------------------------------
+// Fillable fallback: render pdfkit visual PDF + overlay filled AcroForm fields
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates a branded pdfkit PDF and overlays filled AcroForm text fields on top.
+ * Produces a fillable PDF identical in appearance to the template path, used when
+ * the pre-built template is unavailable.
+ */
+async function generateFillablePdfFromLayout(record, options = {}) {
+  const { generateApplicationPdfBuffer } = require('./pdf-layout');
+
+  // Step 1: Generate a BLANK visual pdfkit PDF (labels + underlines, no values).
+  // Values are filled in step 3 via AcroForm fields only — avoids double rendering.
+  const visualBuf = await generateApplicationPdfBuffer({}, {
+    companyName: options.companyName || 'No Limit Capital',
+    margin:      options.margin      || 24,
+    logoPath:    options.logoPath,
+    headerScale: options.headerScale || 0.75,
+  });
+
+  // Step 2: Load with pdf-lib and overlay AcroForm fields
+  const pdfDoc    = await PDFDocument.load(visualBuf);
+  const form      = pdfDoc.getForm();
+  const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const page      = pdfDoc.getPages()[0];
+  const PAGE_H    = 792;
+
+  const { coords } = computeFieldCoords(612, options.margin || 24, options.headerScale || 0.75);
+
+  for (const c of coords) {
+    if (!c.fieldName) continue;
+    const pdfLibY = PAGE_H - c.y - c.height;
+    try {
+      const field = form.createTextField(c.fieldName);
+      field.addToPage(page, {
+        x: c.x, y: pdfLibY,
+        width:  Math.max(8, c.width),
+        height: Math.max(8, c.height),
+        borderWidth: 0,
+      });
+    } catch (_) {}
+  }
+
+  // Make all fields transparent (no background / border colour)
+  form.getFields().forEach((f) => {
+    f.acroField.getWidgets().forEach((w) => {
+      try {
+        const mk = w.getOrCreateMK();
+        mk.set(PDFName.of('BG'), PDFArray.withContext(pdfDoc.context));
+        mk.delete(PDFName.of('BC'));
+      } catch (_) {}
+    });
+  });
+
+  form.updateFieldAppearances(helvetica);
+
+  // Step 3: Fill all text fields with record values
+  const fieldMap = buildFieldMappings(record);
+  Object.entries(fieldMap).forEach(([name, value]) => setTextField(form, name, value));
+
+  // Step 4: Handle signature fields
+  const owner1Name = `${normalizeValue(record.owner_first_name)} ${normalizeValue(record.owner_last_name)}`.trim();
+  const owner2Name = `${normalizeValue(record.additional_owner_first_name)} ${normalizeValue(record.additional_owner_last_name)}`.trim();
+  const sigPairs = [
+    { field: 'signature',            raw: record.signature,            fallback: owner1Name },
+    { field: 'signature_additional', raw: record.signature_additional, fallback: owner2Name },
+  ];
+  for (const { field, raw, fallback } of sigPairs) {
+    if (isBase64Image(raw)) {
+      const ok = await embedSignatureImage(pdfDoc, page, form, field, raw);
+      if (!ok) setTextField(form, field, fallback);
+    } else if (raw && raw.trim()) {
+      setTextField(form, field, raw.trim());
+    } else {
+      setTextField(form, field, fallback);
+    }
+  }
+
+  return Buffer.from(await pdfDoc.save());
+}
+
+module.exports = { generateApplicationPdfFromTemplate, generateFillablePdfFromLayout };
